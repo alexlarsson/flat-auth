@@ -15,7 +15,7 @@ import urllib.parse
 import requests
 import base64
 from datetime import datetime, timedelta
-from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey
+from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, DateTime
 
 ################# CONFIG ###########################
 
@@ -50,7 +50,9 @@ foreign_ids = Table('foreign_ids', metadata,
                     Column('user_id', None, ForeignKey('users.id')))
 purchases = Table('purchases', metadata,
                   Column('app_id', String, primary_key=True),
-                  Column('user_id', None, ForeignKey('users.id')))
+                  Column('user_id', None, ForeignKey('users.id')),
+                  Column('until', DateTime(timezone=True)))
+
 metadata.create_all(db_connect)
 
 def getUserByForeignId(foreign_id):
@@ -75,12 +77,16 @@ def ensureUserIDForForeignId(foreign_id):
     return user_id
 
 def isAppPurchasedByUser(app_id, user_id):
-    result = db_connect.execute(select([purchases]).where(purchases.c.app_id == app_id and purchases.c.user_id == user_id ))
+    result = db_connect.execute(select([purchases]).where(purchases.c.app_id == app_id and purchases.c.user_id == user_id))
     row = result.fetchone()
-    return row != None
+    if row == None:
+        return False
+    return row.until >= datetime.utcnow()
 
-def markPurchasedByUser(app_id, user_id):
-    result = db_connect.execute(purchases.insert().values(app_id = app_id, user_id = user_id))
+def markPurchasedByUser(app_id, user_id, num_seconds):
+    db_connect.execute(purchases.delete().where(purchases.c.app_id == app_id and purchases.c.user_id == user_id))
+    until = datetime.utcnow() + timedelta(seconds=num_seconds)
+    result = db_connect.execute(purchases.insert().values(app_id = app_id, user_id = user_id, until = until))
 
 ################# BASIC APP ######################
 
@@ -173,8 +179,9 @@ def purchase(purchaseid):
     purchase_req["redirect_uri"] = orig_redirect_uri
     purchase_req["state"] = orig_state
 
-    purchase_uri = '%s/purchase/%s/done' % (baseURL, purchaseid)
-    return render_template('purchase.html', app_id=purchase_req["id"], buy_url=purchase_uri)
+    purchase_uri1 = '%s/purchase/%s/done?secs=5' % (baseURL, purchaseid)
+    purchase_uri2 = '%s/purchase/%s/done?secs=300' % (baseURL, purchaseid)
+    return render_template('purchase.html', app_id=purchase_req["id"], buy_url1=purchase_uri1, buy_url2=purchase_uri2)
 
 @app.route('/purchase/<purchaseid>/done')
 def purchased_done(purchaseid):
@@ -182,11 +189,21 @@ def purchased_done(purchaseid):
         abort(404)
     purchase_req = purchase_requests[purchaseid]
 
+    secs = request.args.get("secs")
     redirect_uri = '%s?%s' % (purchase_req["redirect_uri"], urllib.parse.urlencode ({
-        'state': purchase_req.get("state")
+        'state': purchase_req.get("state"),
+        'redirect_uri': baseURL + '/purchase/' + purchaseid + '/done_redirect',
     }))
-    markPurchasedByUser(purchase_req["id"], purchase_req["userid"])
+    markPurchasedByUser(purchase_req["id"], purchase_req["userid"], int(secs))
     return redirect(redirect_uri)
+
+@app.route('/purchase/<purchaseid>/done_redirect')
+def purchased_done_redirect(purchaseid):
+    if not purchaseid in purchase_requests:
+        abort(404)
+    purchase_req = purchase_requests[purchaseid]
+
+    return render_template('purchase_done.html', app_id=purchase_req["id"])
 
 ################## API ###########################
 
@@ -238,7 +255,7 @@ class BeginPurchase(Resource):
             "userid": userid,
         };
 
-        return {'purchase_id': purchaseid }
+        return {'start_uri': 'purchase/%s' % (purchaseid) }
 
 api.add_resource(GetToken, '/api/v1/get_tokens')
 api.add_resource(BeginPurchase, '/api/v1/begin_purchase')
