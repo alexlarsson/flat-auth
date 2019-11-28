@@ -232,7 +232,7 @@ class GetToken(Resource):
             if isAppPurchasedByUser(id, userid):
                 tokens[id] = jwt.encode({
                     'sub': 'users/%d' % userid,
-                    'scope': [id],
+                    'prefixes': [id],
                     'exp': datetime.utcnow() + repoTokenLifetime,
                     'name': 'auth.py',
                 }, repo_secret, algorithm='HS256').decode('utf-8')
