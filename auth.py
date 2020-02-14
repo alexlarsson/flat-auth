@@ -3,7 +3,7 @@
 # Run with something like:
 # FLASK_APP=auth.py flask-3 run --host=0.0.0.0 --port=7777
 
-from flask import Flask, request, render_template, session, redirect
+from flask import Flask, request, render_template, session, redirect, url_for
 from flask_restful import Resource, Api, abort, reqparse
 from sqlalchemy import create_engine, select
 import json
@@ -25,13 +25,12 @@ apiTokenLifetime = timedelta(days=30)
 repoTokenLifetime = timedelta(minutes=10)
 
 # Must set these options:
-#  baseURL - url to the server
 #  api_secret
 #  repo_secret="secret"
 #  googleClientID
 #  googleClientSecret = 'qw9p0KcVP_3p80Dili4oFUFC'
 
-from authconfig import baseURL, api_secret, repo_secret, googleClientID, googleClientSecret
+from authconfig import api_secret, repo_secret, googleClientID, googleClientSecret
 
 ################# GLOBAL DEFINES ###########################
 
@@ -115,7 +114,7 @@ def login():
     google_url = "%s?%s" % (googleAauthorizeURL, urllib.parse.urlencode({
         'response_type': 'code',
         'client_id': googleClientID,
-        'redirect_uri': baseURL + '/login_google',
+        'redirect_uri': url_for('login_google', _external=True),
         'scope': 'openid email',
         'state': state
     }))
@@ -135,7 +134,7 @@ def login_google():
         'grant_type': 'authorization_code',
         'client_id': googleClientID,
         'client_secret': googleClientSecret,
-        'redirect_uri': baseURL + '/login_google',
+        'redirect_uri': url_for('login_google', _external=True),
         'code': code,
     }))
 
@@ -179,8 +178,10 @@ def purchase(purchaseid):
     purchase_req["redirect_uri"] = orig_redirect_uri
     purchase_req["state"] = orig_state
 
-    purchase_uri1 = '%s/purchase/%s/done?secs=5' % (baseURL, purchaseid)
-    purchase_uri2 = '%s/purchase/%s/done?secs=300' % (baseURL, purchaseid)
+    purchase_uri1 = url_for('purchased_done', purchaseid=purchaseid, secs=5,
+                            _external=True)
+    purchase_uri2 = url_for('purchased_done', purchaseid=purchaseid, secs=300,
+                            _external=True)
     return render_template('purchase.html', app_id=purchase_req["id"], buy_url1=purchase_uri1, buy_url2=purchase_uri2)
 
 @app.route('/purchase/<purchaseid>/done')
@@ -192,7 +193,8 @@ def purchased_done(purchaseid):
     secs = request.args.get("secs")
     redirect_uri = '%s?%s' % (purchase_req["redirect_uri"], urllib.parse.urlencode ({
         'state': purchase_req.get("state"),
-        'redirect_uri': baseURL + '/purchase/' + purchaseid + '/done_redirect',
+        'redirect_uri': url_for('purchased_done_redirect', purchaseid=purchaseid,
+                                _external=True),
     }))
     markPurchasedByUser(purchase_req["id"], purchase_req["userid"], int(secs))
     return redirect(redirect_uri)
